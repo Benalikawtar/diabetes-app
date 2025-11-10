@@ -26,26 +26,7 @@ BAD = "#dc2626"
 SUBTLE = "#64748b"
 
 # =======================
-# Chargement modèle & seuil
-# =======================
-@st.cache_resource
-def load_model_and_threshold():
-    model = joblib.load("model_xgb.pkl")
-    # seuil par défaut = 0.10 si fichier absent
-    threshold = 0.10
-    try:
-        with open("thresholds.json", "r") as f:
-            th_all = json.load(f)
-            # on prend le seuil XGBoost (clé 'xgb')
-            threshold = float(th_all.get("xgb", threshold))
-    except Exception:
-        pass
-    return model, threshold
-
-model, THRESH = load_model_and_threshold()
-
-# =======================
-# Schéma des features attendues
+# Constantes features
 # =======================
 FEATURES = [
     'age', 'hypertension', 'heart_disease', 'bmi', 'HbA1c_level', 'blood_glucose_level',
@@ -53,13 +34,36 @@ FEATURES = [
     'smoking_history_current', 'smoking_history_ever', 'smoking_history_former',
     'smoking_history_never', 'smoking_history_not current', 'smoking_history_unknown'
 ]
+NUMERIC_FEATURES = ['age', 'hypertension', 'heart_disease', 'bmi', 'HbA1c_level', 'blood_glucose_level']
 
 CATEG_MAP_GENDER = ["Female", "Male", "Other"]
 CATEG_MAP_SMOKE = ["never", "former", "current", "ever", "not current", "unknown"]
 
+# =======================
+# Chargement modèle, scaler & seuil
+# =======================
+@st.cache_resource
+def load_assets():
+    model = joblib.load("model_xgb.pkl")
+    scaler = joblib.load("scaler.pkl")  # << IMPORTANT
+    # Seuil par défaut plus réaliste si fichier absent
+    threshold = 0.46
+    try:
+        with open("thresholds.json", "r") as f:
+            th_all = json.load(f)
+            threshold = float(th_all.get("xgb", threshold))
+    except Exception:
+        pass
+    return model, scaler, threshold
+
+model, scaler, THRESH = load_assets()
+
+# =======================
+# Helpers
+# =======================
 def one_hot_from_raw_row(age, hypertension, heart_disease, bmi, hba1c, glucose,
-                         gender, smoking):
-    """Construit le vecteur FEATURES à partir des entrées brutes."""
+                         gender, smoking) -> pd.DataFrame:
+    """Construit un DataFrame 1 ligne aligné sur FEATURES."""
     row = {
         'age': age,
         'hypertension': int(hypertension),
@@ -73,30 +77,29 @@ def one_hot_from_raw_row(age, hypertension, heart_disease, bmi, hba1c, glucose,
         'smoking_history_current': 0, 'smoking_history_ever': 0, 'smoking_history_former': 0,
         'smoking_history_never': 0, 'smoking_history_not current': 0, 'smoking_history_unknown': 0,
     }
-
-    # one-hot gender
     gkey = f"gender_{gender}"
     if gkey in row:
         row[gkey] = 1
-
-    # one-hot smoking
     skey = f"smoking_history_{smoking}"
     if skey in row:
         row[skey] = 1
-
-    # ordonner
-    return np.array([[row[f] for f in FEATURES]], dtype=float)
+    X = pd.DataFrame([row], columns=FEATURES, dtype=float)
+    # scaler sur colonnes numériques uniquement
+    X.loc[:, NUMERIC_FEATURES] = scaler.transform(X[NUMERIC_FEATURES])
+    return X
 
 def ensure_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Accepte 2 formats :
-      - format brut : colonnes ['age','hypertension','heart_disease','bmi','HbA1c_level','blood_glucose_level','gender','smoking_history']
+    Accepte:
+      - format brut: ['age','hypertension','heart_disease','bmi','HbA1c_level','blood_glucose_level','gender','smoking_history']
       - format one-hot déjà aligné sur FEATURES
-    Retourne un DataFrame aligné sur FEATURES.
+    Retourne un DataFrame aligné sur FEATURES et scaled (NUMERIC_FEATURES).
     """
     # Cas 1 : déjà one-hot complet
     if all(col in df.columns for col in FEATURES):
-        return df[FEATURES].copy()
+        X = df[FEATURES].copy()
+        X.loc[:, NUMERIC_FEATURES] = scaler.transform(X[NUMERIC_FEATURES])
+        return X
 
     # Cas 2 : format brut -> one-hot
     required_raw = ['age','hypertension','heart_disease','bmi','HbA1c_level','blood_glucose_level','gender','smoking_history']
@@ -107,28 +110,23 @@ def ensure_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
             f"{required_raw}"
         )
 
-    # normalisation des valeurs texte
     tmp = df.copy()
-    tmp['gender'] = tmp['gender'].astype(str).str.title()  # Female/Male/Other
+    tmp['gender'] = tmp['gender'].astype(str).str.title()     # Female/Male/Other
     tmp['smoking_history'] = tmp['smoking_history'].astype(str).str.lower()
 
-    # construire one-hot
     oh = pd.DataFrame(0, index=tmp.index, columns=FEATURES, dtype=float)
 
-    # numériques/binaires
-    for col in ['age','hypertension','heart_disease','bmi','HbA1c_level','blood_glucose_level']:
+    for col in NUMERIC_FEATURES:
         oh[col] = tmp[col].astype(float)
 
-    # gender
     for g in CATEG_MAP_GENDER:
-        col = f"gender_{g}"
-        oh[col] = (tmp['gender'] == g).astype(int)
+        oh[f"gender_{g}"] = (tmp['gender'] == g).astype(int)
 
-    # smoke
     for s in CATEG_MAP_SMOKE:
-        col = f"smoking_history_{s}"
-        oh[col] = (tmp['smoking_history'] == s).astype(int)
+        oh[f"smoking_history_{s}"] = (tmp['smoking_history'] == s).astype(int)
 
+    # scale
+    oh.loc[:, NUMERIC_FEATURES] = scaler.transform(oh[NUMERIC_FEATURES])
     return oh[FEATURES].copy()
 
 def predict_proba_batch(X: pd.DataFrame) -> np.ndarray:
@@ -146,7 +144,7 @@ def risk_text(p: float, th: float) -> str:
 st.markdown(f"""
 <h1 style="margin-bottom:0">🩺 DiagDiabète</h1>
 <p style="color:{SUBTLE}; margin-top:0">
-Modèle **XGBoost** (seuil décision {THRESH:.2f}) — Application Data Mining (Azure)
+Modèle <b>XGBoost</b> — Seuil décision <b>{THRESH:.2f}</b> — Application Data Mining (Azure)
 </p>
 """, unsafe_allow_html=True)
 
@@ -208,8 +206,7 @@ with tab_csv:
             total_rows = len(df_raw)
             st.success(f"Fichier chargé ({total_rows} lignes).")
 
-            # prépare X (auto détection format)
-            X = ensure_features_from_df(df_raw)
+            X = ensure_features_from_df(df_raw)   # << applique aussi le scaler
             proba = predict_proba_batch(X)
             pred = (proba >= THRESH).astype(int)
 
@@ -217,7 +214,6 @@ with tab_csv:
             out["probability"] = proba
             out["prediction"] = pred
 
-            # Résumé
             colA, colB, colC = st.columns(3)
             with colA:
                 st.metric("Seuil utilisé", f"{THRESH:.2f}")
@@ -226,7 +222,6 @@ with tab_csv:
             with colC:
                 st.metric("Taux positifs", f"{pred.mean()*100:.1f}%")
 
-            # Graph répartition proba
             fig, ax = plt.subplots(figsize=(6,3))
             ax.hist(proba, bins=30, color="#60a5fa", edgecolor="white")
             ax.axvline(THRESH, color="red", linestyle="--", label=f"Seuil {THRESH:.2f}")
@@ -236,7 +231,6 @@ with tab_csv:
             ax.legend()
             st.pyplot(fig)
 
-            # Si la vérité terrain est présente -> métriques
             if "diabetes" in df_raw.columns:
                 y_true = df_raw["diabetes"].values.astype(int)
                 try:
@@ -257,7 +251,6 @@ with tab_csv:
                 m4.metric("F1", f"{f1:.3f}")
                 m5.metric("AUC", f"{auc:.3f}" if not np.isnan(auc) else "—")
 
-                # Matrice de confusion
                 fig2, ax2 = plt.subplots(figsize=(4,3.2))
                 im = ax2.imshow(cm, cmap="Blues")
                 for (i, j), v in np.ndenumerate(cm):
@@ -268,7 +261,6 @@ with tab_csv:
                 ax2.set_title("Matrice de confusion")
                 st.pyplot(fig2)
 
-            # Téléchargement
             csv_bytes = out.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "💾 Télécharger les prédictions (CSV)",
