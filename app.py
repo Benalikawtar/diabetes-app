@@ -32,7 +32,7 @@ SUBTLE = "#64748b"
 def load_model_and_threshold():
     model = joblib.load("model_xgb.pkl")
     # seuil par défaut = 0.10 si fichier absent
-    thresholds = {"xgb": 0.462}
+    thresholds = 0.462
     try:
         with open("thresholds.json", "r") as f:
             th_all = json.load(f)
