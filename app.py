@@ -216,11 +216,10 @@ with tab_csv:
 
             colA, colB, colC = st.columns(3)
             with colA:
-                st.metric("Seuil utilisé", f"{THRESH:.2f}")
-            with colB:
                 st.metric("Positifs prédits", int(pred.sum()))
-            with colC:
+            with colB:
                 st.metric("Taux positifs", f"{pred.mean()*100:.1f}%")
+            
 
             fig, ax = plt.subplots(figsize=(6,3))
             ax.hist(proba, bins=30, color="#60a5fa", edgecolor="white")
