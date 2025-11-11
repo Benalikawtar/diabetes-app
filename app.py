@@ -144,7 +144,7 @@ def risk_text(p: float, th: float) -> str:
 st.markdown(f"""
 <h1 style="margin-bottom:0">🩺 DiagDiabète</h1>
 <p style="color:{SUBTLE}; margin-top:0">
-Modèle <b>XGBoost</b> — Seuil décision <b>{THRESH:.2f}</b> — Application Data Mining (Azure)
+ Application Data Mining (Azure)
 </p>
 """, unsafe_allow_html=True)
 
@@ -224,7 +224,6 @@ with tab_csv:
 
             fig, ax = plt.subplots(figsize=(6,3))
             ax.hist(proba, bins=30, color="#60a5fa", edgecolor="white")
-            ax.axvline(THRESH, color="red", linestyle="--", label=f"Seuil {THRESH:.2f}")
             ax.set_title("Distribution des probabilités")
             ax.set_xlabel("Probabilité prédite")
             ax.set_ylabel("Nombre")
