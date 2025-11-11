@@ -183,6 +183,7 @@ with tab_form:
         <div style="padding:14px;border:1px solid {color};border-radius:10px">
             <b>Résultat</b><br>
             Probabilité: <b>{proba:.3f}</b> 
+            
             Verdict: <span style="color:{color};font-weight:700">{risk_text(proba, THRESH)}</span>
         </div>
         """, unsafe_allow_html=True)
