@@ -171,7 +171,7 @@ with tab_form:
             heart_disease = st.select_slider("Maladie cardiaque", options=[0,1], value=0)
             st.markdown("<br>", unsafe_allow_html=True)
 
-        submitted = st.form_submit_button("🔎 Lancer la prédiction")
+        submitted = st.form_submit_button(" Lancer la prédiction")
 
     if submitted:
         X = one_hot_from_raw_row(age, hypertension, heart_disease, bmi, hba1c, glucose, gender, smoking)
